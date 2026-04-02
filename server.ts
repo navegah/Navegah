@@ -136,10 +136,10 @@ async function startServer() {
 
       if (isExpired && tokens.refresh_token) {
         console.log('Token expirando, tentando renovar automaticamente...');
-        const { tokens: newTokens } = await client.refreshAccessToken();
+        const { credentials } = await client.refreshAccessToken();
         
         // Merge new tokens with old ones to preserve the refresh_token
-        const updatedTokens = { ...tokens, ...newTokens };
+        const updatedTokens = { ...tokens, ...credentials };
         
         res.cookie('google_tokens', JSON.stringify(updatedTokens), {
           httpOnly: true,

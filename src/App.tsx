@@ -86,8 +86,8 @@ export default function App() {
 
   // Form State
   const [formData, setFormData] = useState({
-    calendarName: 'Navegah (Pedro)',
-    client: 'Navegah',
+    calendarName: '',
+    client: '',
     otherClient: '',
     title: '',
     start: getNextHour(),
@@ -391,11 +391,6 @@ export default function App() {
         <div className="max-w-2xl mx-auto">
           {/* Form Section */}
           <section className="space-y-8">
-            <div className="space-y-2">
-              <h2 className="text-3xl font-bold tracking-tight">Novo Compromisso</h2>
-              <p className="text-navegah-grey/60">Preencha os detalhes para inserir na agenda da Navegah.</p>
-            </div>
-
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-4">
                 {/* Event Type & Client */}
@@ -403,10 +398,12 @@ export default function App() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-navegah-grey/80 uppercase tracking-wider">Tipo do Evento</label>
                     <select
+                      required
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-navegah-lime/50 focus:border-navegah-lime/50 transition-all [color-scheme:dark]"
                       value={formData.calendarName}
                       onChange={e => setFormData({ ...formData, calendarName: e.target.value })}
                     >
+                      <option value="" disabled>Selecione o tipo</option>
                       {EVENT_TYPES.map(type => (
                         <option key={type} value={type}>{type}</option>
                       ))}
@@ -415,10 +412,12 @@ export default function App() {
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-navegah-grey/80 uppercase tracking-wider">Cliente</label>
                     <select
+                      required
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-navegah-lime/50 focus:border-navegah-lime/50 transition-all [color-scheme:dark]"
                       value={formData.client}
                       onChange={e => setFormData({ ...formData, client: e.target.value })}
                     >
+                      <option value="" disabled>Selecione o cliente</option>
                       {CLIENTS.map(client => (
                         <option key={client} value={client}>{client}</option>
                       ))}
@@ -643,7 +642,7 @@ export default function App() {
 
       <footer className="max-w-4xl mx-auto px-6 py-12 border-t border-white/5 text-center">
         <p className="text-xs text-navegah-grey/40 uppercase tracking-[0.2em] font-medium">
-          Navegah &copy; 2026 • Design & Tecnologia
+          Desenvolvido com 💚 pela Navegah
         </p>
       </footer>
 
