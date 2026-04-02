@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim();
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim();
+// Production URL (e.g., https://your-app.a.run.app)
 const APP_URL = (process.env.APP_URL || 'http://localhost:3000').trim();
 const REDIRECT_URI = `${APP_URL.replace(/\/$/, '')}/auth/callback`;
 
