@@ -1,5 +1,4 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
@@ -42,6 +41,11 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', env: process.env.NODE_ENV, vercel: !!process.env.VERCEL });
+});
+
 // Auth URL endpoint
 app.get('/api/auth/url', (req, res) => {
   try {
@@ -59,7 +63,7 @@ app.get('/api/auth/url', (req, res) => {
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',
       ],
-      include_granted_scopes: true, // Helps Google remember previous consents
+      include_granted_scopes: true,
     });
     res.json({ url });
   } catch (error) {
@@ -77,12 +81,11 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
     const client = getOAuthClient(req);
     const { tokens } = await client.getToken(code as string);
     
-    // Store tokens in a secure cookie
     res.cookie('google_tokens', JSON.stringify(tokens), {
       httpOnly: true,
       secure: true,
       sameSite: 'none',
-      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     res.send(`
@@ -134,26 +137,21 @@ const getAuthenticatedClient = async (req: express.Request, res: express.Respons
     const client = getOAuthClient(req);
     client.setCredentials(tokens);
 
-    // Check if access token is expired or about to expire (within 5 mins)
     const expiryDate = tokens.expiry_date || 0;
     const isExpired = Date.now() >= (expiryDate - 300000);
 
     if (isExpired && tokens.refresh_token) {
-      console.log('Token expirando, tentando renovar automaticamente...');
       const { credentials } = await client.refreshAccessToken();
-      
-      // Merge new tokens with old ones to preserve the refresh_token
       const updatedTokens = { ...tokens, ...credentials };
       
       res.cookie('google_tokens', JSON.stringify(updatedTokens), {
         httpOnly: true,
         secure: true,
         sameSite: 'none',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: 30 * 24 * 60 * 60 * 1000,
       });
       
       client.setCredentials(updatedTokens);
-      console.log('Token renovado com sucesso.');
     }
 
     return client;
@@ -163,13 +161,10 @@ const getAuthenticatedClient = async (req: express.Request, res: express.Respons
   }
 };
 
-export default app;
-
-// Get User Profile
+// API Routes
 app.get('/api/auth/me', async (req, res) => {
   const client = await getAuthenticatedClient(req, res);
   if (!client) return res.status(401).json({ error: 'Not authenticated' });
-
   try {
     const oauth2 = google.oauth2({ version: 'v2', auth: client });
     const { data } = await oauth2.userinfo.get();
@@ -179,11 +174,9 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
-// List Calendars
 app.get('/api/calendar/list', async (req, res) => {
   const client = await getAuthenticatedClient(req, res);
   if (!client) return res.status(401).json({ error: 'Not authenticated' });
-
   try {
     const calendar = google.calendar({ version: 'v3', auth: client });
     const { data } = await calendar.calendarList.list();
@@ -193,72 +186,35 @@ app.get('/api/calendar/list', async (req, res) => {
   }
 });
 
-// Get Free/Busy info
 app.post('/api/calendar/freebusy', async (req, res) => {
-  const tokenCookie = req.cookies.google_tokens;
-  if (!tokenCookie) return res.status(401).json({ error: 'Not authenticated' });
-
+  const client = await getAuthenticatedClient(req, res);
+  if (!client) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const { timeMin, timeMax, calendarIds } = req.body;
-    const tokens = JSON.parse(tokenCookie);
-    const client = getOAuthClient(req);
-    client.setCredentials(tokens);
     const calendar = google.calendar({ version: 'v3', auth: client });
-
     const { data } = await calendar.freebusy.query({
-      requestBody: {
-        timeMin,
-        timeMax,
-        items: calendarIds.map((id: string) => ({ id })),
-      },
+      requestBody: { timeMin, timeMax, items: calendarIds.map((id: string) => ({ id })) },
     });
-
     res.json(data);
   } catch (error) {
-    console.error('FreeBusy Error:', error);
     res.status(500).json({ error: 'Failed to check availability' });
   }
 });
 
-// Check for conflicts across all relevant calendars
 app.post('/api/calendar/check-conflicts', async (req, res) => {
   const client = await getAuthenticatedClient(req, res);
   if (!client) return res.status(401).json({ error: 'Not authenticated' });
-
   try {
     const calendar = google.calendar({ version: 'v3', auth: client });
-
     const { start, duration } = req.body;
-    const navegahCalendarNames = [
-      'Navegah (Pedro)',
-      'Navegah (Captação)',
-      'Navegah (Reuniões)',
-      'Navegah (Visita técnica)'
-    ];
-
-    console.log(`Verificando conflitos GLOBAIS para: ${start}, duração: ${duration}`);
-
-    // 1. Get all calendars to find the IDs of Navegah calendars
+    const navegahCalendarNames = ['Navegah (Pedro)', 'Navegah (Captação)', 'Navegah (Reuniões)', 'Navegah (Visita técnica)'];
     const { data: calList } = await calendar.calendarList.list();
     const relevantCalendars = calList.items?.filter(c => 
-      c.summary === 'primary' || 
-      navegahCalendarNames.some(name => c.summary?.trim().toLowerCase() === name.toLowerCase())
+      c.summary === 'primary' || navegahCalendarNames.some(name => c.summary?.trim().toLowerCase() === name.toLowerCase())
     ) || [];
-
-    console.log(`Agendas relevantes encontradas: ${relevantCalendars.map(c => c.summary).join(', ')}`);
-
-    // 2. Parse date
-    let startDate: Date;
-    if (start.includes('Z') || start.includes('+') || (start.match(/-/g) || []).length > 2) {
-      startDate = new Date(start);
-    } else {
-      startDate = new Date(`${start}:00-03:00`);
-    }
+    let startDate = new Date(start);
     const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
-
-    // 3. Check each relevant calendar for events
     const allConflicts: any[] = [];
-    
     await Promise.all(relevantCalendars.map(async (cal) => {
       try {
         const { data } = await calendar.events.list({
@@ -268,175 +224,73 @@ app.post('/api/calendar/check-conflicts', async (req, res) => {
           singleEvents: true,
           orderBy: 'startTime',
         });
-
-        if (data.items && data.items.length > 0) {
-          data.items.forEach(item => {
-            allConflicts.push({
-              ...item,
-              calendarName: cal.summary // Add calendar name to show in UI
-            });
-          });
-        }
-      } catch (err) {
-        console.error(`Erro ao buscar eventos na agenda ${cal.summary}:`, err);
-      }
+        if (data.items) data.items.forEach(item => allConflicts.push({ ...item, calendarName: cal.summary }));
+      } catch (err) {}
     }));
-
-    console.log(`Total de conflitos globais encontrados: ${allConflicts.length}`);
     res.json({ conflicts: allConflicts });
   } catch (error) {
-    console.error('Global Conflict Check Error:', error);
-    res.status(500).json({ error: 'Failed to check global conflicts' });
+    res.status(500).json({ error: 'Failed to check conflicts' });
   }
 });
 
-// Create Calendar Event
 app.post('/api/calendar/events', async (req, res) => {
   const client = await getAuthenticatedClient(req, res);
   if (!client) return res.status(401).json({ error: 'Not authenticated' });
-
   try {
     const calendar = google.calendar({ version: 'v3', auth: client });
-
-    const { 
-      title, 
-      start, 
-      duration, 
-      location, 
-      description, 
-      guests, 
-      team, 
-      calendarName, 
-      isOnline,
-      client: clientName
-    } = req.body;
-
-    // Basic validation
-    if (!title || !start) {
-      return res.status(400).json({ error: 'Título e Data/Horário são obrigatórios.' });
-    }
-
-    // Find the correct calendar ID for insertion
-    let targetCalendarId = 'primary';
-    if (calendarName && calendarName !== 'Navegah (Pedro)') {
-      const { data: calList } = await calendar.calendarList.list();
-      console.log('Agendas disponíveis (inserção):', calList.items?.map(c => c.summary).join(', '));
-      
-      const targetCal = calList.items?.find(c => 
-        c.summary?.trim().toLowerCase() === calendarName.trim().toLowerCase()
-      );
-      
-      if (targetCal) {
-        targetCalendarId = targetCal.id!;
-        console.log(`Agenda encontrada para inserção: ${targetCal.summary} (ID: ${targetCalendarId})`);
-      } else {
-        console.log(`Agenda "${calendarName}" não encontrada na inserção, usando "primary"`);
-      }
-    }
-
-    // Calculate end time based on duration (minutes)
+    const { title, start, duration, location, description, guests, team, calendarName, isOnline } = req.body;
     const startDate = new Date(start);
     const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
-
-    // Format dates to ensure they have seconds (YYYY-MM-DDTHH:mm:ss)
-    const formatDateTime = (date: Date) => {
-      // We use local time but Google API expects ISO format or offset.
-      // For simplicity, we'll use the local string format that worked before but with seconds.
-      const pad = (n: number) => n.toString().padStart(2, '0');
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-    };
-
-    const formattedStart = formatDateTime(startDate);
-    const formattedEnd = formatDateTime(endDate);
-
-    // Parse attendees safely
+    const { data: calList } = await calendar.calendarList.list();
+    let targetCalendarId = 'primary';
+    if (calendarName) {
+      const targetCal = calList.items?.find(c => c.summary?.trim().toLowerCase() === calendarName.trim().toLowerCase());
+      if (targetCal) targetCalendarId = targetCal.id!;
+    }
     const attendees: any[] = [];
-    
-    // Add team members
-    if (team && Array.isArray(team)) {
-      team.forEach((email: string) => {
-        if (email) attendees.push({ email: email.trim() });
-      });
-    }
-
-    // Add external guests
-    if (guests) {
-      guests.split(',')
-        .map((email: string) => email.trim())
-        .filter((email: string) => email.length > 0 && email.includes('@'))
-        .forEach((email: string) => attendees.push({ email }));
-    }
-
+    if (team) team.forEach((email: string) => attendees.push({ email: email.trim() }));
+    if (guests) guests.split(',').forEach((email: string) => attendees.push({ email: email.trim() }));
     const event: any = {
       summary: title,
-      location: location || (isOnline ? 'Google Meet' : ''),
-      description: description || '',
-      start: {
-        dateTime: formattedStart,
-        timeZone: 'America/Sao_Paulo',
-      },
-      end: {
-        dateTime: formattedEnd,
-        timeZone: 'America/Sao_Paulo',
-      },
-      attendees: attendees,
+      location,
+      description,
+      start: { dateTime: startDate.toISOString() },
+      end: { dateTime: endDate.toISOString() },
+      attendees,
     };
-
-    // Handle Google Meet generation
     if (isOnline) {
       event.conferenceData = {
-        createRequest: {
-          requestId: `navegah-${Date.now()}`,
-          conferenceSolutionKey: { type: 'hangoutsMeet' },
-        },
+        createRequest: { requestId: `navegah-${Date.now()}`, conferenceSolutionKey: { type: 'hangoutsMeet' } }
       };
     }
-
-    console.log(`Enviando evento para o calendário ${targetCalendarId}:`, JSON.stringify(event, null, 2));
-
     const response = await calendar.events.insert({
       calendarId: targetCalendarId,
       requestBody: event,
       conferenceDataVersion: isOnline ? 1 : 0,
       sendUpdates: 'all',
     });
-
     res.json(response.data);
   } catch (error: any) {
-    console.error('Error creating event:', error);
-    
-    if (error.response?.data?.error) {
-      console.error('DETALHES DO ERRO GOOGLE:', JSON.stringify(error.response.data.error, null, 2));
-    }
-
-    const message = error?.response?.data?.error?.message || 'Falha ao criar compromisso. Verifique os dados e tente novamente.';
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error?.response?.data?.error?.message || 'Falha ao criar compromisso' });
   }
 });
 
-async function startServer() {
-  const PORT = 3000;
-
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
+// Development server logic
+if (!process.env.VERCEL) {
+  const startDevServer = async () => {
+    const PORT = 3000;
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    }
+    app.listen(PORT, '0.0.0.0', () => console.log(`Server running on http://localhost:${PORT}`));
+  };
+  startDevServer();
 }
 
-startServer();
+export default app;
