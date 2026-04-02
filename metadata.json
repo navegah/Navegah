@@ -1,0 +1,5 @@
+{
+  "name": "Navegah | AGENDA",
+  "description": "Sistema de agendamento autônomo para o time Navegah, integrado ao Google Calendar.",
+  "requestFramePermissions": []
+}
