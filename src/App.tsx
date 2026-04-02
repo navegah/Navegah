@@ -27,6 +27,8 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
 
   // Constants
   const CLIENTS = [
@@ -62,6 +64,7 @@ export default function App() {
     { name: 'Jhony', email: 'criacao2.navegah@gmail.com' },
     { name: 'Marluce', email: 'atendimento.navegah@gmail.com' },
     { name: 'Matheus', email: 'criacao.navegah@gmail.com' },
+    { name: 'Ramon', email: 'ramoncamilo.rc@gmail.com' },
   ];
 
   const DURATIONS = [
@@ -243,11 +246,42 @@ export default function App() {
     setUser(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent, force: boolean = false) => {
+    if (e) e.preventDefault();
     
     setSubmitting(true);
     setError(null);
+
+    // Check for conflicts first if not forced
+    if (!force) {
+      try {
+        console.log('Iniciando verificação de conflitos...');
+        const conflictRes = await fetch('/api/calendar/check-conflicts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            start: formData.start,
+            duration: formData.duration,
+            calendarName: formData.calendarName
+          }),
+        });
+
+        if (conflictRes.ok) {
+          const { conflicts: foundConflicts } = await conflictRes.json();
+          console.log('Conflitos encontrados:', foundConflicts);
+          if (foundConflicts && foundConflicts.length > 0) {
+            setConflicts(foundConflicts);
+            setShowConflictModal(true);
+            setSubmitting(false);
+            return;
+          }
+        } else {
+          console.error('Erro na resposta de conflitos:', await conflictRes.text());
+        }
+      } catch (err) {
+        console.error('Erro ao verificar conflitos:', err);
+      }
+    }
 
     try {
       const res = await fetch('/api/calendar/events', {
@@ -261,12 +295,14 @@ export default function App() {
 
       if (res.ok) {
         setSuccess(true);
+        setShowConflictModal(false);
+        setConflicts([]);
         setFormData({
           calendarName: 'Navegah (Pedro)',
           client: 'Navegah',
           otherClient: '',
           title: '',
-          start: '',
+          start: getNextHour(),
           duration: 60,
           location: '',
           description: '',
@@ -610,6 +646,85 @@ export default function App() {
           Navegah &copy; 2026 • Design & Tecnologia
         </p>
       </footer>
+
+      {/* Conflict Modal */}
+      <AnimatePresence>
+        {showConflictModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowConflictModal(false)}
+              className="absolute inset-0 bg-navegah-deep/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-md bg-navegah-deep border border-white/10 rounded-3xl p-8 shadow-2xl space-y-6"
+            >
+              <div className="flex items-center gap-4 text-navegah-pink">
+                <div className="p-3 bg-navegah-pink/10 rounded-2xl">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">Conflito de Horário</h3>
+                  <p className="text-sm text-navegah-grey/60">Já existem compromissos neste horário.</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-xs font-bold text-navegah-grey/40 uppercase tracking-widest">Compromissos Encontrados:</p>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                  {conflicts.map((conflict, idx) => (
+                    <div key={idx} className="p-3 bg-white/5 rounded-xl border border-white/5">
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="text-sm font-semibold text-white">{conflict.summary}</p>
+                      </div>
+                      <p className="text-[10px] text-navegah-grey/60 mb-2">
+                        {new Date(conflict.start.dateTime || conflict.start.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - 
+                        {new Date(conflict.end.dateTime || conflict.end.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      {conflict.attendees && conflict.attendees.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-white/5">
+                          <p className="text-[8px] font-bold text-navegah-grey/40 uppercase tracking-widest mb-1">Participantes:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {conflict.attendees
+                              .map((attendee: any) => TEAM_MEMBERS.find(m => m.email === attendee.email)?.name)
+                              .filter(Boolean)
+                              .map((name: string, aIdx: number) => (
+                                <span key={aIdx} className="text-[8px] px-1.5 py-0.5 rounded-full bg-white/5 text-navegah-grey/80 border border-white/10">
+                                  {name}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={() => handleSubmit(undefined, true)}
+                  disabled={submitting}
+                  className="w-full bg-navegah-lime text-navegah-deep font-bold py-4 rounded-2xl hover:bg-white transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : 'Agendar Assim Mesmo'}
+                </button>
+                <button
+                  onClick={() => setShowConflictModal(false)}
+                  className="w-full bg-white/5 text-white font-bold py-4 rounded-2xl hover:bg-white/10 transition-all active:scale-[0.98]"
+                >
+                  Cancelar e Ajustar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

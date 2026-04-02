@@ -55,7 +55,7 @@ async function startServer() {
           'https://www.googleapis.com/auth/userinfo.profile',
           'https://www.googleapis.com/auth/userinfo.email',
         ],
-        prompt: 'consent',
+        include_granted_scopes: true, // Helps Google remember previous consents
       });
       res.json({ url });
     } catch (error) {
@@ -120,15 +120,51 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Get User Profile
-  app.get('/api/auth/me', async (req, res) => {
+  // Helper to get authenticated client with auto-refresh
+  const getAuthenticatedClient = async (req: express.Request, res: express.Response) => {
     const tokenCookie = req.cookies.google_tokens;
-    if (!tokenCookie) return res.status(401).json({ error: 'Not authenticated' });
+    if (!tokenCookie) return null;
 
     try {
       const tokens = JSON.parse(tokenCookie);
       const client = getOAuthClient();
       client.setCredentials(tokens);
+
+      // Check if access token is expired or about to expire (within 5 mins)
+      const expiryDate = tokens.expiry_date || 0;
+      const isExpired = Date.now() >= (expiryDate - 300000);
+
+      if (isExpired && tokens.refresh_token) {
+        console.log('Token expirando, tentando renovar automaticamente...');
+        const { tokens: newTokens } = await client.refreshAccessToken();
+        
+        // Merge new tokens with old ones to preserve the refresh_token
+        const updatedTokens = { ...tokens, ...newTokens };
+        
+        res.cookie('google_tokens', JSON.stringify(updatedTokens), {
+          httpOnly: true,
+          secure: true,
+          sameSite: 'none',
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+        
+        client.setCredentials(updatedTokens);
+        console.log('Token renovado com sucesso.');
+      }
+
+      return client;
+    } catch (error) {
+      console.error('Erro na autenticação/renovação:', error);
+      return null;
+    }
+  };
+
+  // Get User Profile
+  app.get('/api/auth/me', async (req, res) => {
+    const client = await getAuthenticatedClient(req, res);
+    if (!client) return res.status(401).json({ error: 'Not authenticated' });
+
+    try {
       const oauth2 = google.oauth2({ version: 'v2', auth: client });
       const { data } = await oauth2.userinfo.get();
       res.json(data);
@@ -139,13 +175,10 @@ async function startServer() {
 
   // List Calendars
   app.get('/api/calendar/list', async (req, res) => {
-    const tokenCookie = req.cookies.google_tokens;
-    if (!tokenCookie) return res.status(401).json({ error: 'Not authenticated' });
+    const client = await getAuthenticatedClient(req, res);
+    if (!client) return res.status(401).json({ error: 'Not authenticated' });
 
     try {
-      const tokens = JSON.parse(tokenCookie);
-      const client = getOAuthClient();
-      client.setCredentials(tokens);
       const calendar = google.calendar({ version: 'v3', auth: client });
       const { data } = await calendar.calendarList.list();
       res.json(data.items || []);
@@ -181,15 +214,82 @@ async function startServer() {
     }
   });
 
-  // Create Calendar Event
-  app.post('/api/calendar/events', async (req, res) => {
-    const tokenCookie = req.cookies.google_tokens;
-    if (!tokenCookie) return res.status(401).json({ error: 'Not authenticated' });
+  // Check for conflicts across all relevant calendars
+  app.post('/api/calendar/check-conflicts', async (req, res) => {
+    const client = await getAuthenticatedClient(req, res);
+    if (!client) return res.status(401).json({ error: 'Not authenticated' });
 
     try {
-      const tokens = JSON.parse(tokenCookie);
-      const client = getOAuthClient();
-      client.setCredentials(tokens);
+      const calendar = google.calendar({ version: 'v3', auth: client });
+
+      const { start, duration } = req.body;
+      const navegahCalendarNames = [
+        'Navegah (Pedro)',
+        'Navegah (Captação)',
+        'Navegah (Reuniões)',
+        'Navegah (Visita técnica)'
+      ];
+
+      console.log(`Verificando conflitos GLOBAIS para: ${start}, duração: ${duration}`);
+
+      // 1. Get all calendars to find the IDs of Navegah calendars
+      const { data: calList } = await calendar.calendarList.list();
+      const relevantCalendars = calList.items?.filter(c => 
+        c.summary === 'primary' || 
+        navegahCalendarNames.some(name => c.summary?.trim().toLowerCase() === name.toLowerCase())
+      ) || [];
+
+      console.log(`Agendas relevantes encontradas: ${relevantCalendars.map(c => c.summary).join(', ')}`);
+
+      // 2. Parse date
+      let startDate: Date;
+      if (start.includes('Z') || start.includes('+') || (start.match(/-/g) || []).length > 2) {
+        startDate = new Date(start);
+      } else {
+        startDate = new Date(`${start}:00-03:00`);
+      }
+      const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
+
+      // 3. Check each relevant calendar for events
+      const allConflicts: any[] = [];
+      
+      await Promise.all(relevantCalendars.map(async (cal) => {
+        try {
+          const { data } = await calendar.events.list({
+            calendarId: cal.id!,
+            timeMin: startDate.toISOString(),
+            timeMax: endDate.toISOString(),
+            singleEvents: true,
+            orderBy: 'startTime',
+          });
+
+          if (data.items && data.items.length > 0) {
+            data.items.forEach(item => {
+              allConflicts.push({
+                ...item,
+                calendarName: cal.summary // Add calendar name to show in UI
+              });
+            });
+          }
+        } catch (err) {
+          console.error(`Erro ao buscar eventos na agenda ${cal.summary}:`, err);
+        }
+      }));
+
+      console.log(`Total de conflitos globais encontrados: ${allConflicts.length}`);
+      res.json({ conflicts: allConflicts });
+    } catch (error) {
+      console.error('Global Conflict Check Error:', error);
+      res.status(500).json({ error: 'Failed to check global conflicts' });
+    }
+  });
+
+  // Create Calendar Event
+  app.post('/api/calendar/events', async (req, res) => {
+    const client = await getAuthenticatedClient(req, res);
+    if (!client) return res.status(401).json({ error: 'Not authenticated' });
+
+    try {
       const calendar = google.calendar({ version: 'v3', auth: client });
 
       const { 
@@ -210,13 +310,21 @@ async function startServer() {
         return res.status(400).json({ error: 'Título e Data/Horário são obrigatórios.' });
       }
 
-      // Find the correct calendar ID
+      // Find the correct calendar ID for insertion
       let targetCalendarId = 'primary';
       if (calendarName && calendarName !== 'Navegah (Pedro)') {
         const { data: calList } = await calendar.calendarList.list();
-        const targetCal = calList.items?.find(c => c.summary === calendarName);
+        console.log('Agendas disponíveis (inserção):', calList.items?.map(c => c.summary).join(', '));
+        
+        const targetCal = calList.items?.find(c => 
+          c.summary?.trim().toLowerCase() === calendarName.trim().toLowerCase()
+        );
+        
         if (targetCal) {
           targetCalendarId = targetCal.id!;
+          console.log(`Agenda encontrada para inserção: ${targetCal.summary} (ID: ${targetCalendarId})`);
+        } else {
+          console.log(`Agenda "${calendarName}" não encontrada na inserção, usando "primary"`);
         }
       }
 
