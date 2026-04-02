@@ -14,24 +14,34 @@ const __dirname = path.dirname(__filename);
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim();
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim();
 // Production URL (e.g., https://your-app.a.run.app)
-const APP_URL = (process.env.APP_URL || 'http://localhost:3000').trim();
-const REDIRECT_URI = `${APP_URL.replace(/\/$/, '')}/auth/callback`;
+const APP_URL = (process.env.APP_URL || '').trim();
 
-console.log('--- CONFIGURAÇÃO OAUTH ---');
-console.log('APP_URL:', APP_URL);
-console.log('REDIRECT_URI:', REDIRECT_URI);
-console.log('---------------------------');
+const getOAuthClient = (req?: express.Request) => {
+  let redirectUri = '';
+  
+  if (APP_URL) {
+    redirectUri = `${APP_URL.replace(/\/$/, '')}/auth/callback`;
+  } else if (req) {
+    const protocol = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers.host;
+    redirectUri = `${protocol}://${host}/auth/callback`;
+  } else {
+    redirectUri = 'http://localhost:3000/auth/callback';
+  }
 
-const getOAuthClient = () => {
+  console.log('Using Redirect URI:', redirectUri);
+
   return new google.auth.OAuth2(
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
-    REDIRECT_URI
+    redirectUri
   );
 };
 
+const app = express();
+export default app;
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
 
   app.use(express.json());
@@ -45,8 +55,7 @@ async function startServer() {
         return res.status(500).json({ error: 'Configuração do Google incompleta. Verifique os Secrets.' });
       }
 
-      const client = getOAuthClient();
-      console.log('Gerando URL de Auth com Redirect URI:', REDIRECT_URI);
+      const client = getOAuthClient(req);
       const url = client.generateAuthUrl({
         access_type: 'offline',
         scope: [
@@ -70,7 +79,7 @@ async function startServer() {
     if (!code) return res.status(400).send('No code provided');
 
     try {
-      const client = getOAuthClient();
+      const client = getOAuthClient(req);
       const { tokens } = await client.getToken(code as string);
       
       // Store tokens in a secure cookie
@@ -127,7 +136,7 @@ async function startServer() {
 
     try {
       const tokens = JSON.parse(tokenCookie);
-      const client = getOAuthClient();
+      const client = getOAuthClient(req);
       client.setCredentials(tokens);
 
       // Check if access token is expired or about to expire (within 5 mins)
@@ -423,9 +432,11 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer();
