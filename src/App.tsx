@@ -227,17 +227,20 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
+      setError(null);
       const res = await fetch('/api/auth/url');
       const data = await res.json();
       
       if (!res.ok) {
         setError(data.error || 'Erro ao iniciar login');
+        console.error('Login error:', data);
         return;
       }
       
       window.open(data.url, 'oauth_popup', 'width=600,height=700');
     } catch (err) {
-      setError('Erro de conexão ao servidor');
+      setError('Erro de conexão ao servidor. Verifique se o backend está rodando.');
+      console.error('Connection error:', err);
     }
   };
 
