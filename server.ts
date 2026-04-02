@@ -53,7 +53,6 @@ async function startServer() {
           'https://www.googleapis.com/auth/calendar.readonly',
           'https://www.googleapis.com/auth/userinfo.profile',
           'https://www.googleapis.com/auth/userinfo.email',
-          'https://www.googleapis.com/auth/spreadsheets',
         ],
         prompt: 'consent',
       });
@@ -286,36 +285,6 @@ async function startServer() {
         conferenceDataVersion: isOnline ? 1 : 0,
         sendUpdates: 'all',
       });
-
-      // --- GOOGLE SHEETS INTEGRATION ---
-      const spreadsheetId = process.env.GOOGLE_SHEET_ID?.trim();
-      if (spreadsheetId) {
-        try {
-          const sheets = google.sheets({ version: 'v4', auth: client });
-          const oauth2 = google.oauth2({ version: 'v2', auth: client });
-          const { data: userInfo } = await oauth2.userinfo.get();
-
-          await sheets.spreadsheets.values.append({
-            spreadsheetId,
-            range: 'A1', // Appends to the first sheet
-            valueInputOption: 'USER_ENTERED',
-            requestBody: {
-              values: [[
-                new Date().toLocaleString('pt-BR'), // Timestamp do agendamento
-                title,
-                clientName,
-                formattedStart,
-                userInfo.name || userInfo.email, // Quem agendou
-                response.data.htmlLink // Link do evento
-              ]]
-            }
-          });
-          console.log('Dados enviados para o Google Sheets com sucesso.');
-        } catch (sheetError) {
-          console.error('Erro ao atualizar Google Sheets:', sheetError);
-          // We don't fail the whole request if sheets fail, as the calendar event was created
-        }
-      }
 
       res.json(response.data);
     } catch (error: any) {
