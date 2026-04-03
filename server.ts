@@ -285,6 +285,34 @@ app.post('/api/calendar/events', async (req, res) => {
   }
 });
 
+app.post('/api/calendar/acl', async (req, res) => {
+  const client = await getAuthenticatedClient(req, res);
+  if (!client) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const { calendarId, emails } = req.body;
+    const calendar = google.calendar({ version: 'v3', auth: client });
+    
+    const results = await Promise.all(emails.map(async (email: string) => {
+      try {
+        await calendar.acl.insert({
+          calendarId,
+          requestBody: {
+            role: 'writer',
+            scope: { type: 'user', value: email.trim() }
+          }
+        });
+        return { email, status: 'success' };
+      } catch (err: any) {
+        return { email, status: 'error', message: err.message };
+      }
+    }));
+    
+    res.json({ results });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update calendar permissions' });
+  }
+});
+
 // Development server logic
 if (!process.env.VERCEL) {
   const startDevServer = async () => {

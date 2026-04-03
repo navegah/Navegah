@@ -11,7 +11,8 @@ import {
   CheckCircle2, 
   AlertCircle,
   Loader2,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck
 } from 'lucide-react';
 
 interface User {
@@ -100,6 +101,7 @@ export default function App() {
   });
 
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [calendars, setCalendars] = useState<any[]>([]);
 
   const suggestNextSlot = async () => {
@@ -236,6 +238,40 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error fetching calendars:', err);
+    }
+  };
+
+  const authorizeTeam = async () => {
+    const selectedCal = calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase());
+    if (!selectedCal || selectedCal.accessRole !== 'owner') return;
+
+    setIsAuthorizing(true);
+    try {
+      const emails = TEAM_MEMBERS
+        .map(m => m.email)
+        .filter(email => email !== user?.email);
+
+      const res = await fetch('/api/calendar/acl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calendarId: selectedCal.id,
+          emails
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const successCount = data.results.filter((r: any) => r.status === 'success').length;
+        alert(`${successCount} membros do time Navegah agora têm acesso de edição nesta agenda!`);
+        fetchCalendars(); // Refresh to update canWrite status
+      } else {
+        throw new Error('Failed to authorize team');
+      }
+    } catch (err) {
+      setError('Erro ao autorizar o time. Verifique se você é o dono desta agenda.');
+    } finally {
+      setIsAuthorizing(false);
     }
   };
 
@@ -440,6 +476,17 @@ export default function App() {
                         <AlertCircle size={10} />
                         Você não tem permissão para gravar nesta agenda.
                       </p>
+                    )}
+                    {calendars.length > 0 && formData.calendarName && calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase())?.accessRole === 'owner' && (
+                      <button
+                        type="button"
+                        onClick={authorizeTeam}
+                        disabled={isAuthorizing}
+                        className="text-[10px] font-bold text-navegah-lime hover:text-white transition-colors flex items-center gap-1 mt-2 bg-navegah-lime/10 px-2 py-1 rounded-md w-fit"
+                      >
+                        {isAuthorizing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck size={12} />}
+                        Autorizar Time Navegah (Dar acesso de edição)
+                      </button>
                     )}
                   </div>
                   <div className="space-y-2">
