@@ -278,7 +278,7 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            start: formData.start,
+            start: new Date(formData.start).toISOString(),
             duration: formData.duration,
             calendarName: formData.calendarName
           }),
@@ -307,6 +307,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...formData,
+          start: new Date(formData.start).toISOString(),
           client: formData.client === 'Outros' ? formData.otherClient : formData.client
         }),
       });

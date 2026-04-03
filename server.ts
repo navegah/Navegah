@@ -361,8 +361,10 @@ app.post('/api/calendar/events', async (req, res) => {
     const calendar = google.calendar({ version: 'v3', auth: client });
     const { title, start, duration, location, description, guests, team, calendarName: calName, isOnline } = req.body;
     calendarName = calName;
-    const startDate = new Date(start);
-    const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
+    
+    const startDateObj = new Date(start);
+    const endDateObj = new Date(startDateObj.getTime() + (duration || 60) * 60000);
+    
     const { data: calList } = await calendar.calendarList.list();
     
     // 1. Try to find in user's own list
@@ -392,8 +394,8 @@ app.post('/api/calendar/events', async (req, res) => {
       summary: title,
       location,
       description,
-      start: { dateTime: startDate.toISOString() },
-      end: { dateTime: endDate.toISOString() },
+      start: { dateTime: startDateObj.toISOString() },
+      end: { dateTime: endDateObj.toISOString() },
       attendees,
     };
     if (isOnline) {
