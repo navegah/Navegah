@@ -78,6 +78,7 @@ app.get('/api/auth/url', (req, res) => {
     const client = getOAuthClient(req);
     const url = client.generateAuthUrl({
       access_type: 'offline',
+      prompt: 'consent', // FORÇA a tela de consentimento para mostrar as caixas de seleção
       scope: [
         'https://www.googleapis.com/auth/calendar',
         'https://www.googleapis.com/auth/calendar.events',
