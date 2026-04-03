@@ -251,6 +251,8 @@ export default function App() {
         .map(m => m.email)
         .filter(email => email !== user?.email);
 
+      console.log('Authorizing emails:', emails, 'on calendar:', selectedCal.id);
+
       const res = await fetch('/api/calendar/acl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -263,7 +265,18 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         const successCount = data.results.filter((r: any) => r.status === 'success').length;
-        alert(`${successCount} membros do time Navegah agora têm acesso de edição nesta agenda!`);
+        const errors = data.results.filter((r: any) => r.status === 'error');
+        
+        if (successCount > 0) {
+          alert(`${successCount} membros do time Navegah agora têm acesso de edição nesta agenda!`);
+        }
+        
+        if (errors.length > 0) {
+          console.error('Authorization errors:', errors);
+          const errorMsg = errors.map((e: any) => `${e.email}: ${e.message}`).join('\n');
+          alert(`Alguns membros não puderam ser autorizados:\n${errorMsg}`);
+        }
+        
         fetchCalendars(); // Refresh to update canWrite status
       } else {
         throw new Error('Failed to authorize team');

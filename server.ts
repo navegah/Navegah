@@ -58,6 +58,7 @@ app.get('/api/auth/url', (req, res) => {
     const url = client.generateAuthUrl({
       access_type: 'offline',
       scope: [
+        'https://www.googleapis.com/auth/calendar',
         'https://www.googleapis.com/auth/calendar.events',
         'https://www.googleapis.com/auth/calendar.readonly',
         'https://www.googleapis.com/auth/userinfo.profile',
