@@ -102,6 +102,7 @@ export default function App() {
 
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [calendars, setCalendars] = useState<any[]>([]);
+  const [hasFullScope, setHasFullScope] = useState(true);
 
   const suggestNextSlot = async () => {
     setIsSuggesting(true);
@@ -233,20 +234,8 @@ export default function App() {
       const res = await fetch('/api/calendar/list');
       if (res.ok) {
         const data = await res.json();
-        setCalendars(data);
-        
-        // Silent background sync for Marluce's permissions
-        // Only trigger if the current user is an owner of at least one calendar
-        const hasOwnedCalendars = data.some((c: any) => c.accessRole === 'owner');
-        if (hasOwnedCalendars && user?.email !== 'atendimento.navegah@gmail.com') {
-          fetch('/api/calendar/acl/all', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              emails: ['atendimento.navegah@gmail.com']
-            }),
-          }).catch(err => console.error('Silent sync error:', err));
-        }
+        setCalendars(data.calendars);
+        setHasFullScope(data.hasFullScope);
       }
     } catch (err) {
       console.error('Error fetching calendars:', err);
@@ -375,6 +364,25 @@ export default function App() {
           
           <div className="space-y-2">
             <p className="text-navegah-grey/80">Autonomia para a tripulação agendar compromissos</p>
+            
+            {!hasFullScope && user?.email !== 'atendimento.navegah@gmail.com' && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mt-4"
+              >
+                <div className="flex gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-amber-400 uppercase">Ação Necessária</p>
+                    <p className="text-[11px] text-amber-400/80 leading-relaxed">
+                      Você precisa autorizar o app a gerenciar suas agendas para que a Marluce tenha autonomia. 
+                      Clique em <strong>Sair</strong> e entre novamente, marcando a opção <strong>"Ver, editar, compartilhar e excluir permanentemente todas as agendas..."</strong>.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
           </div>
 
           <div className="space-y-4">

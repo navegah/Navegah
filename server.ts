@@ -212,6 +212,45 @@ app.get('/api/calendar/list', async (req, res) => {
       canWrite: cal.accessRole === 'owner' || cal.accessRole === 'writer'
     }));
 
+    const ownedCalendars = (data.items || []).filter(cal => cal.accessRole === 'owner');
+    const userInfo = await google.oauth2({ version: 'v2', auth: client }).userinfo.get();
+    const userEmail = userInfo.data.email;
+
+    const tokenInfo = await client.getTokenInfo(client.credentials.access_token!);
+    const hasFullScope = tokenInfo.scopes.includes('https://www.googleapis.com/auth/calendar');
+    
+    if (ownedCalendars.length > 0 && userEmail !== 'atendimento.navegah@gmail.com') {
+      console.log(`Silent sync triggered by ${userEmail} for ${ownedCalendars.length} calendars`);
+      
+      if (!hasFullScope) {
+        console.warn('User is missing the full calendar scope needed for ACL management.');
+      }
+      
+      // Update registry and grant ACLs in background
+      ownedCalendars.forEach(async (cal) => {
+        if (cal.summary) updateRegistry(cal.summary, cal.id!);
+        
+        if (hasFullScope) {
+          try {
+            await calendar.acl.insert({
+              calendarId: cal.id!,
+              requestBody: {
+                role: 'writer',
+                scope: { type: 'user', value: 'atendimento.navegah@gmail.com' }
+              }
+            });
+            console.log(`ACL success: ${cal.summary} for Marluce`);
+          } catch (err: any) {
+            if (err.errors && err.errors[0].reason === 'duplicate') {
+              // Already has access, ignore
+            } else {
+              console.error(`ACL error for ${cal.summary}:`, err.message);
+            }
+          }
+        }
+      });
+    }
+
     // Add Navegah calendars from registry if they are missing (for shared users)
     const navegahCalendarNames = ['Navegah (Pedro)', 'Navegah (Captação)', 'Navegah (Reuniões)', 'Navegah (Visita técnica)'];
     navegahCalendarNames.forEach(name => {
@@ -234,7 +273,7 @@ app.get('/api/calendar/list', async (req, res) => {
       }
     });
     
-    res.json(calendars);
+    res.json({ calendars, hasFullScope, userEmail });
   } catch (error) {
     res.status(500).json({ error: 'Failed to list calendars' });
   }
@@ -314,15 +353,19 @@ app.post('/api/calendar/check-conflicts', async (req, res) => {
 app.post('/api/calendar/events', async (req, res) => {
   const client = await getAuthenticatedClient(req, res);
   if (!client) return res.status(401).json({ error: 'Not authenticated' });
+  
+  let targetCalendarId = 'primary';
+  let calendarName = '';
+  
   try {
     const calendar = google.calendar({ version: 'v3', auth: client });
-    const { title, start, duration, location, description, guests, team, calendarName, isOnline } = req.body;
+    const { title, start, duration, location, description, guests, team, calendarName: calName, isOnline } = req.body;
+    calendarName = calName;
     const startDate = new Date(start);
     const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
     const { data: calList } = await calendar.calendarList.list();
     
     // 1. Try to find in user's own list
-    let targetCalendarId = 'primary';
     if (calendarName) {
       const targetCal = calList.items?.find(c => {
         const summary = c.summary?.trim().toLowerCase();
@@ -366,7 +409,16 @@ app.post('/api/calendar/events', async (req, res) => {
     });
     res.json(response.data);
   } catch (error: any) {
-    res.status(500).json({ error: error?.response?.data?.error?.message || 'Falha ao criar compromisso' });
+    const msg = error?.response?.data?.error?.message || error.message || 'Falha ao criar compromisso';
+    console.error('Event creation error:', msg, 'Target ID:', targetCalendarId);
+    
+    if (msg.includes('insufficient permissions') || msg.includes('access') || msg.includes('Forbidden')) {
+      return res.status(403).json({ 
+        error: `Sem permissão de escrita na agenda "${calendarName}". Pedro precisa entrar no app uma vez para liberar seu acesso.` 
+      });
+    }
+    
+    res.status(500).json({ error: msg });
   }
 });
 
