@@ -101,7 +101,6 @@ export default function App() {
   });
 
   const [isSuggesting, setIsSuggesting] = useState(false);
-  const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [calendars, setCalendars] = useState<any[]>([]);
 
   const suggestNextSlot = async () => {
@@ -235,106 +234,22 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setCalendars(data);
+        
+        // Silent background sync for Marluce's permissions
+        // Only trigger if the current user is an owner of at least one calendar
+        const hasOwnedCalendars = data.some((c: any) => c.accessRole === 'owner');
+        if (hasOwnedCalendars && user?.email !== 'atendimento.navegah@gmail.com') {
+          fetch('/api/calendar/acl/all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              emails: ['atendimento.navegah@gmail.com']
+            }),
+          }).catch(err => console.error('Silent sync error:', err));
+        }
       }
     } catch (err) {
       console.error('Error fetching calendars:', err);
-    }
-  };
-
-  const authorizeTeam = async (specificEmail?: string) => {
-    // Improved matching: search by summary OR check if it's the primary calendar
-    const selectedCal = calendars.find(c => 
-      c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase() ||
-      (formData.calendarName === 'Navegah (Pedro)' && c.primary)
-    );
-    
-    if (!selectedCal) {
-      setError('Não foi possível identificar o ID desta agenda no Google. Tente selecionar outra e voltar para esta.');
-      return;
-    }
-
-    if (selectedCal.accessRole !== 'owner') {
-      setError('Apenas o DONO da agenda pode dar permissões. Você parece ter acesso de: ' + selectedCal.accessRole);
-      return;
-    }
-
-    setIsAuthorizing(true);
-    try {
-      const emails = specificEmail 
-        ? [specificEmail] 
-        : TEAM_MEMBERS
-            .map(m => m.email)
-            .filter(email => email !== user?.email);
-
-      console.log('Authorizing emails:', emails, 'on calendar:', selectedCal.id);
-
-      const res = await fetch('/api/calendar/acl', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          calendarId: selectedCal.id,
-          emails
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const successCount = data.results.filter((r: any) => r.status === 'success').length;
-        const errors = data.results.filter((r: any) => r.status === 'error');
-        
-        if (successCount > 0) {
-          alert(`${successCount} acesso(s) de edição configurado(s) com sucesso!`);
-        }
-        
-        if (errors.length > 0) {
-          const errorMsg = errors.map((e: any) => `${e.email}: ${e.message}`).join('\n');
-          alert(`Atenção: Alguns acessos não puderam ser alterados:\n${errorMsg}`);
-        }
-        
-        fetchCalendars();
-      } else {
-        throw new Error('Erro na comunicação com o servidor');
-      }
-    } catch (err) {
-      setError('Erro ao autorizar. Certifique-se de que você fez Logout e Login novamente aceitando todas as permissões.');
-    } finally {
-      setIsAuthorizing(false);
-    }
-  };
-
-  const authorizeMarluceAll = async () => {
-    setIsAuthorizing(true);
-    try {
-      const res = await fetch('/api/calendar/acl/all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emails: ['atendimento.navegah@gmail.com']
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const successCount = data.results.filter((r: any) => r.status === 'success').length;
-        const errors = data.results.filter((r: any) => r.status === 'error');
-        
-        if (successCount > 0) {
-          alert(`Marluce agora tem acesso de edição em ${successCount} das suas agendas!`);
-        }
-        
-        if (errors.length > 0) {
-          const errorMsg = errors.map((e: any) => `${e.calendar} - ${e.email}: ${e.message}`).join('\n');
-          alert(`Atenção: Alguns acessos não puderam ser alterados:\n${errorMsg}`);
-        }
-        
-        fetchCalendars();
-      } else {
-        throw new Error('Erro na comunicação com o servidor');
-      }
-    } catch (err) {
-      setError('Erro ao autorizar. Certifique-se de que você fez Logout e Login novamente aceitando todas as permissões.');
-    } finally {
-      setIsAuthorizing(false);
     }
   };
 
@@ -458,32 +373,8 @@ export default function App() {
             <NavegahLogo className="scale-150" />
           </div>
           
-          <div className="space-y-4">
+          <div className="space-y-2">
             <p className="text-navegah-grey/80">Autonomia para a tripulação agendar compromissos</p>
-            
-            {user && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="pt-4"
-              >
-                <button
-                  onClick={authorizeMarluceAll}
-                  disabled={isAuthorizing}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-6 py-4 text-sm font-bold text-navegah-lime hover:bg-navegah-lime/10 transition-all flex items-center justify-center gap-3 group"
-                >
-                  {isAuthorizing ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                  ) : (
-                    <ShieldCheck className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                  )}
-                  LIBERAR MARLUCE EM TODAS AS MINHAS AGENDAS
-                </button>
-                <p className="text-[10px] text-navegah-grey/60 mt-2 text-center">
-                  Isso dará permissão de edição para atendimento.navegah@gmail.com em todas as agendas que você é o dono.
-                </p>
-              </motion.div>
-            )}
           </div>
 
           <div className="space-y-4">
@@ -539,68 +430,15 @@ export default function App() {
                     <label className="text-sm font-medium text-navegah-grey/80 uppercase tracking-wider">Tipo do Evento</label>
                     <select
                       required
-                      className={`w-full bg-white/5 border rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 transition-all [color-scheme:dark] ${
-                        calendars.length > 0 && calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase()) && !calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase())?.canWrite
-                          ? 'border-amber-500/50 focus:ring-amber-500/50 focus:border-amber-500/50'
-                          : 'border-white/10 focus:ring-navegah-lime/50 focus:border-navegah-lime/50'
-                      }`}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-navegah-lime/50 focus:border-navegah-lime/50 transition-all [color-scheme:dark]"
                       value={formData.calendarName}
                       onChange={e => setFormData({ ...formData, calendarName: e.target.value })}
                     >
                       <option value="" disabled>Selecione o tipo</option>
-                      {EVENT_TYPES.map(type => {
-                        const cal = calendars.find(c => c.summary?.trim().toLowerCase() === type.toLowerCase());
-                        const isReadOnly = cal && !cal.canWrite;
-                        return (
-                          <option key={type} value={type}>
-                            {type} {isReadOnly ? '⚠️ (Apenas Leitura)' : ''}
-                          </option>
-                        );
-                      })}
+                      {EVENT_TYPES.map(type => (
+                        <option key={type} value={type}>{type}</option>
+                      ))}
                     </select>
-                    {calendars.length > 0 && formData.calendarName && (
-                      (() => {
-                        const cal = calendars.find(c => 
-                          c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase() ||
-                          (formData.calendarName === 'Navegah (Pedro)' && c.primary)
-                        );
-                        
-                        if (cal && !cal.canWrite) {
-                          return (
-                            <p className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
-                              <AlertCircle size={10} />
-                              Você não tem permissão para gravar nesta agenda.
-                            </p>
-                          );
-                        }
-                        
-                        if (cal && cal.accessRole === 'owner') {
-                          return (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              <button
-                                type="button"
-                                onClick={() => authorizeTeam()}
-                                disabled={isAuthorizing}
-                                className="text-[10px] font-bold text-navegah-lime hover:text-white transition-colors flex items-center gap-1 bg-navegah-lime/10 px-2 py-1 rounded-md"
-                              >
-                                {isAuthorizing ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck size={12} />}
-                                Autorizar Time Todo
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => authorizeTeam('atendimento.navegah@gmail.com')}
-                                disabled={isAuthorizing}
-                                className="text-[10px] font-bold text-white hover:text-navegah-lime transition-colors flex items-center gap-1 bg-white/10 px-2 py-1 rounded-md border border-white/10"
-                              >
-                                {isAuthorizing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Users size={12} />}
-                                Forçar Acesso: Marluce
-                              </button>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })()
-                    )}
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-navegah-grey/80 uppercase tracking-wider">Cliente</label>
