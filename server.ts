@@ -78,7 +78,6 @@ app.get('/api/auth/url', (req, res) => {
     const client = getOAuthClient(req);
     const url = client.generateAuthUrl({
       access_type: 'offline',
-      prompt: 'consent', // FORÇA a tela de consentimento para mostrar as caixas de seleção
       scope: [
         'https://www.googleapis.com/auth/calendar',
         'https://www.googleapis.com/auth/calendar.events',
@@ -274,7 +273,7 @@ app.get('/api/calendar/list', async (req, res) => {
       }
     });
     
-    res.json({ calendars, hasFullScope, userEmail });
+    res.json(calendars);
   } catch (error) {
     res.status(500).json({ error: 'Failed to list calendars' });
   }

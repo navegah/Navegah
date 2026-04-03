@@ -102,7 +102,6 @@ export default function App() {
 
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [calendars, setCalendars] = useState<any[]>([]);
-  const [hasFullScope, setHasFullScope] = useState(true);
 
   const suggestNextSlot = async () => {
     setIsSuggesting(true);
@@ -234,8 +233,7 @@ export default function App() {
       const res = await fetch('/api/calendar/list');
       if (res.ok) {
         const data = await res.json();
-        setCalendars(data.calendars);
-        setHasFullScope(data.hasFullScope);
+        setCalendars(data);
       }
     } catch (err) {
       console.error('Error fetching calendars:', err);
@@ -409,48 +407,6 @@ export default function App() {
 
       <main className="max-w-4xl mx-auto px-6 py-12">
         <div className="max-w-2xl mx-auto">
-          {/* Warning for missing scopes */}
-          {!hasFullScope && user?.email !== 'atendimento.navegah@gmail.com' && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 mb-12"
-            >
-              <div className="flex gap-4">
-                <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-6 h-6 text-amber-400" />
-                </div>
-                <div className="space-y-3">
-                  <div>
-                    <h3 className="text-lg font-bold text-amber-400 leading-tight">Ação Necessária para Autonomia do Time</h3>
-                    <p className="text-sm text-amber-400/80 mt-1">
-                      O Google bloqueou o acesso automático da Marluce porque você não marcou a permissão de gerenciamento de agendas.
-                    </p>
-                  </div>
-                  
-                  <div className="bg-black/20 rounded-xl p-4 space-y-2">
-                    <p className="text-xs font-semibold text-amber-400/60 uppercase tracking-wider">Como resolver:</p>
-                    <ol className="text-xs text-amber-400/90 list-decimal list-inside space-y-1.5">
-                      <li>Clique no botão <strong>Sair</strong> no topo da página.</li>
-                      <li>Clique em <strong>Entrar com Google</strong> novamente.</li>
-                      <li>Na tela do Google, <strong>MARQUE</strong> a caixa: <br />
-                        <span className="italic opacity-80">"Ver, editar, compartilhar e excluir permanentemente todas as agendas..."</span>
-                      </li>
-                    </ol>
-                  </div>
-                  
-                  <button 
-                    onClick={handleLogout}
-                    className="flex items-center gap-2 bg-amber-500 text-navegah-deep px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-400 transition-colors"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Sair agora para corrigir
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
           {/* Form Section */}
           <section className="space-y-8">
             <form onSubmit={handleSubmit} className="space-y-6">
