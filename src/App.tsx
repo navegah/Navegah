@@ -701,8 +701,14 @@ export default function App() {
                         <p className="text-sm font-semibold text-white">{conflict.summary}</p>
                       </div>
                       <p className="text-[10px] text-navegah-grey/60 mb-2">
-                        {new Date(conflict.start.dateTime || conflict.start.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - 
-                        {new Date(conflict.end.dateTime || conflict.end.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {conflict.start.date ? (
+                          "O dia todo"
+                        ) : (
+                          <>
+                            {new Date(conflict.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - 
+                            {new Date(conflict.end.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </>
+                        )}
                       </p>
                       {conflict.attendees && conflict.attendees.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-white/5">
