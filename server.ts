@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
 import cookieParser from 'cookie-parser';
@@ -14,6 +15,26 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID?.trim();
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET?.trim();
 // Production URL (e.g., https://your-app.a.run.app)
 const APP_URL = (process.env.APP_URL || '').trim();
+
+// Calendar Registry to map names to IDs (helps shared users find secondary calendars)
+const REGISTRY_PATH = path.join(process.cwd(), 'calendar-registry.json');
+function updateRegistry(name: string, id: string) {
+  try {
+    const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8') || '{}');
+    registry[name.trim().toLowerCase()] = id;
+    fs.writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
+  } catch (err) {
+    console.error('Registry update error:', err);
+  }
+}
+function getRegistryId(name: string) {
+  try {
+    const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8') || '{}');
+    return registry[name.trim().toLowerCase()];
+  } catch (err) {
+    return null;
+  }
+}
 
 const getOAuthClient = (req?: express.Request) => {
   let redirectUri = '';
@@ -190,6 +211,28 @@ app.get('/api/calendar/list', async (req, res) => {
       accessRole: cal.accessRole, // 'owner', 'writer', 'reader', 'freeBusyReader'
       canWrite: cal.accessRole === 'owner' || cal.accessRole === 'writer'
     }));
+
+    // Add Navegah calendars from registry if they are missing (for shared users)
+    const navegahCalendarNames = ['Navegah (Pedro)', 'Navegah (Captação)', 'Navegah (Reuniões)', 'Navegah (Visita técnica)'];
+    navegahCalendarNames.forEach(name => {
+      const exists = calendars.some(c => 
+        c.summary?.trim().toLowerCase() === name.toLowerCase() ||
+        (name === 'Navegah (Pedro)' && (c.primary || c.id === 'pedro@navegah.com.br'))
+      );
+      
+      if (!exists) {
+        const registryId = getRegistryId(name);
+        if (registryId) {
+          calendars.push({
+            id: registryId,
+            summary: name,
+            primary: false,
+            accessRole: 'writer', // Assume writer if it's in our Navegah flow
+            canWrite: true
+          });
+        }
+      }
+    });
     
     res.json(calendars);
   } catch (error) {
@@ -220,9 +263,33 @@ app.post('/api/calendar/check-conflicts', async (req, res) => {
     const { start, duration } = req.body;
     const navegahCalendarNames = ['Navegah (Pedro)', 'Navegah (Captação)', 'Navegah (Reuniões)', 'Navegah (Visita técnica)'];
     const { data: calList } = await calendar.calendarList.list();
-    const relevantCalendars = calList.items?.filter(c => 
-      c.summary === 'primary' || navegahCalendarNames.some(name => c.summary?.trim().toLowerCase() === name.toLowerCase())
-    ) || [];
+    
+    // Find calendars by name in user's list OR in registry
+    const relevantCalendars: { id: string, summary: string }[] = [];
+    
+    navegahCalendarNames.forEach(name => {
+      // Try user's list
+      const found = calList.items?.find(c => 
+        c.summary?.trim().toLowerCase() === name.toLowerCase() ||
+        (name === 'Navegah (Pedro)' && (c.primary || c.id === 'pedro@navegah.com.br'))
+      );
+      
+      if (found) {
+        relevantCalendars.push({ id: found.id!, summary: found.summary! });
+      } else {
+        // Try registry
+        const registryId = getRegistryId(name);
+        if (registryId) {
+          relevantCalendars.push({ id: registryId, summary: name });
+        }
+      }
+    });
+
+    // Also include 'primary' if not already there
+    if (!relevantCalendars.some(c => c.id === 'primary')) {
+      relevantCalendars.push({ id: 'primary', summary: 'primary' });
+    }
+
     let startDate = new Date(start);
     const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
     const allConflicts: any[] = [];
@@ -253,10 +320,27 @@ app.post('/api/calendar/events', async (req, res) => {
     const startDate = new Date(start);
     const endDate = new Date(startDate.getTime() + (duration || 60) * 60000);
     const { data: calList } = await calendar.calendarList.list();
+    
+    // 1. Try to find in user's own list
     let targetCalendarId = 'primary';
     if (calendarName) {
-      const targetCal = calList.items?.find(c => c.summary?.trim().toLowerCase() === calendarName.trim().toLowerCase());
-      if (targetCal) targetCalendarId = targetCal.id!;
+      const targetCal = calList.items?.find(c => {
+        const summary = c.summary?.trim().toLowerCase();
+        const searchName = calendarName.trim().toLowerCase();
+        if (summary === searchName) return true;
+        if (calendarName === 'Navegah (Pedro)' && (c.primary || c.id === 'pedro@navegah.com.br')) return true;
+        return false;
+      });
+      
+      if (targetCal) {
+        targetCalendarId = targetCal.id!;
+      } else {
+        // 2. Try to find in registry (Pedro's shared IDs)
+        const registryId = getRegistryId(calendarName);
+        if (registryId) {
+          targetCalendarId = registryId;
+        }
+      }
     }
     const attendees: any[] = [];
     if (team) team.forEach((email: string) => attendees.push({ email: email.trim() }));
@@ -296,6 +380,11 @@ app.post('/api/calendar/acl/all', async (req, res) => {
     // 1. List all calendars
     const { data: calList } = await calendar.calendarList.list();
     const ownedCalendars = (calList.items || []).filter(cal => cal.accessRole === 'owner');
+    
+    // Update registry for these calendars
+    ownedCalendars.forEach(cal => {
+      if (cal.summary) updateRegistry(cal.summary, cal.id!);
+    });
     
     const allResults: any[] = [];
     
