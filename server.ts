@@ -180,7 +180,17 @@ app.get('/api/calendar/list', async (req, res) => {
   try {
     const calendar = google.calendar({ version: 'v3', auth: client });
     const { data } = await calendar.calendarList.list();
-    res.json(data.items || []);
+    
+    // Map calendars with their access roles
+    const calendars = (data.items || []).map(cal => ({
+      id: cal.id,
+      summary: cal.summary,
+      primary: cal.primary,
+      accessRole: cal.accessRole, // 'owner', 'writer', 'reader', 'freeBusyReader'
+      canWrite: cal.accessRole === 'owner' || cal.accessRole === 'writer'
+    }));
+    
+    res.json(calendars);
   } catch (error) {
     res.status(500).json({ error: 'Failed to list calendars' });
   }

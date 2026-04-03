@@ -100,6 +100,7 @@ export default function App() {
   });
 
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [calendars, setCalendars] = useState<any[]>([]);
 
   const suggestNextSlot = async () => {
     setIsSuggesting(true);
@@ -215,6 +216,7 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setUser(data);
+        fetchCalendars();
       } else {
         setUser(null);
       }
@@ -222,6 +224,18 @@ export default function App() {
       setUser(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCalendars = async () => {
+    try {
+      const res = await fetch('/api/calendar/list');
+      if (res.ok) {
+        const data = await res.json();
+        setCalendars(data);
+      }
+    } catch (err) {
+      console.error('Error fetching calendars:', err);
     }
   };
 
@@ -402,15 +416,31 @@ export default function App() {
                     <label className="text-sm font-medium text-navegah-grey/80 uppercase tracking-wider">Tipo do Evento</label>
                     <select
                       required
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-navegah-lime/50 focus:border-navegah-lime/50 transition-all [color-scheme:dark]"
+                      className={`w-full bg-white/5 border rounded-xl px-4 py-3.5 focus:outline-none focus:ring-2 transition-all [color-scheme:dark] ${
+                        calendars.length > 0 && calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase()) && !calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase())?.canWrite
+                          ? 'border-amber-500/50 focus:ring-amber-500/50 focus:border-amber-500/50'
+                          : 'border-white/10 focus:ring-navegah-lime/50 focus:border-navegah-lime/50'
+                      }`}
                       value={formData.calendarName}
                       onChange={e => setFormData({ ...formData, calendarName: e.target.value })}
                     >
                       <option value="" disabled>Selecione o tipo</option>
-                      {EVENT_TYPES.map(type => (
-                        <option key={type} value={type}>{type}</option>
-                      ))}
+                      {EVENT_TYPES.map(type => {
+                        const cal = calendars.find(c => c.summary?.trim().toLowerCase() === type.toLowerCase());
+                        const isReadOnly = cal && !cal.canWrite;
+                        return (
+                          <option key={type} value={type}>
+                            {type} {isReadOnly ? '⚠️ (Apenas Leitura)' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
+                    {calendars.length > 0 && formData.calendarName && calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase()) && !calendars.find(c => c.summary?.trim().toLowerCase() === formData.calendarName.trim().toLowerCase())?.canWrite && (
+                      <p className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
+                        <AlertCircle size={10} />
+                        Você não tem permissão para gravar nesta agenda.
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-navegah-grey/80 uppercase tracking-wider">Cliente</label>
