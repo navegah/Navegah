@@ -286,6 +286,49 @@ app.post('/api/calendar/events', async (req, res) => {
   }
 });
 
+app.post('/api/calendar/acl/all', async (req, res) => {
+  const client = await getAuthenticatedClient(req, res);
+  if (!client) return res.status(401).json({ error: 'Not authenticated' });
+  try {
+    const { emails } = req.body;
+    const calendar = google.calendar({ version: 'v3', auth: client });
+    
+    // 1. List all calendars
+    const { data: calList } = await calendar.calendarList.list();
+    const ownedCalendars = (calList.items || []).filter(cal => cal.accessRole === 'owner');
+    
+    const allResults: any[] = [];
+    
+    // 2. For each owned calendar, grant access to all emails
+    for (const cal of ownedCalendars) {
+      const calResults = await Promise.all(emails.map(async (email: string) => {
+        try {
+          await calendar.acl.insert({
+            calendarId: cal.id!,
+            requestBody: {
+              role: 'writer',
+              scope: { type: 'user', value: email.trim() }
+            }
+          });
+          return { calendar: cal.summary, email, status: 'success' };
+        } catch (err: any) {
+          // If user already has access, it might throw an error, we should handle it gracefully
+          if (err.errors && err.errors[0].reason === 'duplicate') {
+            return { calendar: cal.summary, email, status: 'success', message: 'Already has access' };
+          }
+          return { calendar: cal.summary, email, status: 'error', message: err.message };
+        }
+      }));
+      allResults.push(...calResults);
+    }
+    
+    res.json({ results: allResults });
+  } catch (error) {
+    console.error('Full ACL error:', error);
+    res.status(500).json({ error: 'Failed to update all calendar permissions' });
+  }
+});
+
 app.post('/api/calendar/acl', async (req, res) => {
   const client = await getAuthenticatedClient(req, res);
   if (!client) return res.status(401).json({ error: 'Not authenticated' });
